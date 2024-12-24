@@ -9,28 +9,17 @@
  */
 package org.weasis.pref;
 
+import static java.util.stream.Collectors.*;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.Authenticator;
-import java.net.HttpURLConnection;
-import java.net.PasswordAuthentication;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URLConnection;
-import java.net.URLDecoder;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Properties;
+import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
@@ -94,7 +83,6 @@ public class ConfigData {
   public static final String PARAM_ARGUMENT = "arg"; // NON-NLS
   public static final String PARAM_PROPERTY = "pro"; // NON-NLS
   public static final String PARAM_CODEBASE = "cdb"; // NON-NLS
-  public static final String PARAM_CODEBASE_EXT = "cdb-ext"; // NON-NLS
   public static final String PARAM_AUTHORIZATION = "auth"; // NON-NLS
 
   private final List<String> arguments = new ArrayList<>();
@@ -254,7 +242,7 @@ public class ConfigData {
     }
   }
 
-  private void extractArgFromUri(String uri) {
+  public void extractArgFromUri(String uri) {
     String url = URLDecoder.decode(uri, StandardCharsets.UTF_8);
     String[] cmds = url.split("\\$");
     boolean windows = System.getProperty(P_OS_NAME, "").toLowerCase().startsWith("win"); // NON-NLS
@@ -325,7 +313,7 @@ public class ConfigData {
     configParams.forEach(
         (k, v) -> {
           switch (k) {
-            case PARAM_CONFIG_URL -> addProperty(P_WEASIS_CONFIG_URL, v.getFirst());
+            case PARAM_CONFIG_URL -> addAndReplaceProperty(P_WEASIS_CONFIG_URL, v.getFirst());
             case PARAM_CODEBASE -> addProperty(P_WEASIS_CODEBASE_URL, v.getFirst());
             case PARAM_AUTHORIZATION -> addProperty(P_HTTP_AUTHORIZATION, v.getFirst());
             case PARAM_PROPERTY -> addProperties(v);
@@ -360,8 +348,17 @@ public class ConfigData {
   }
 
   private void addProperty(String key, String val) {
+    addProperty(key, val, false);
+  }
+
+  private void addAndReplaceProperty(String key, String val) {
+    addProperty(key, val, true);
+  }
+
+  private void addProperty(String key, String val, boolean forceIfPresent) {
     if (Utils.hasText(key) && Utils.hasText(val)) {
-      properties.putIfAbsent(key, val);
+      if (forceIfPresent) properties.put(key, val);
+      else properties.putIfAbsent(key, val);
     }
   }
 
@@ -445,38 +442,7 @@ public class ConfigData {
       if (Utils.hasText(val)) {
         applyProxyProperty("socksProxyPort", p.getProperty("proxy.socks.port"), mproxy); // NON-NLS
       }
-
-      boolean auth = Utils.getEmptyToFalse(p.getProperty("proxy.auth"));
-      if (auth) {
-        String authUser = p.getProperty("proxy.auth.user");
-        String authPassword;
-        try {
-          byte[] pwd = Utils.getByteArrayProperty(p, "proxy.auth.pwd", null);
-          if (pwd != null) {
-            pwd = Utils.decrypt(pwd, "proxy.auth");
-            if (pwd != null && pwd.length > 0) {
-              authPassword = new String(pwd, StandardCharsets.UTF_8);
-              applyPasswordAuthentication(authUser, authPassword);
-              applyProxyProperty("http.proxyUser", authUser, mproxy);
-              applyProxyProperty("http.proxyPassword", authPassword, mproxy);
-            }
-          }
-        } catch (Exception e) {
-          LOGGER.error("Cannot store the proxy password", e);
-        }
-      }
     }
-  }
-
-  private static void applyPasswordAuthentication(
-      final String authUser, final String authPassword) {
-    Authenticator.setDefault(
-        new Authenticator() {
-          @Override
-          public PasswordAuthentication getPasswordAuthentication() {
-            return new PasswordAuthentication(authUser, authPassword.toCharArray());
-          }
-        });
   }
 
   private static void applyProxyProperty(String key, String value, boolean manual) {
@@ -557,6 +523,105 @@ public class ConfigData {
     paramList.add(Utils.removeEnglobingQuotes(value));
   }
 
+  private URI adaptConfigServiceURI(URI configServiceUri) throws URISyntaxException {
+    List<String> paramsToOverride = List.of("user", "host"); // NON-NLS
+
+    String configServiceQueryString = configServiceUri.getQuery();
+    Map<String, List<String>> queryParamsMap;
+
+    if (!Utils.hasText(configServiceQueryString)) {
+      queryParamsMap = new LinkedHashMap<>();
+    } else {
+      queryParamsMap =
+          Arrays.stream(configServiceQueryString.split("&"))
+              .filter(s -> s != null && !s.isEmpty())
+              .map(s -> Arrays.copyOf(s.split("=", 2), 2))
+              .collect(
+                  groupingBy(
+                      s ->
+                          paramsToOverride.contains(s[0].toLowerCase()) ? s[0].toLowerCase() : s[0],
+                      mapping(s -> s[1], toList())));
+    }
+
+    // If 'weasis.user' prop is already defined, it replaces the config service query parameter
+    String user = properties.getProperty(P_WEASIS_USER);
+
+    if (Utils.hasText(user)) {
+      queryParamsMap.put("user", List.of(user)); // NON-NLS
+    } else if (!queryParamsMap.containsKey("user")) { // NON-NLS
+      user = System.getProperty("user.name");
+      if (user != null) {
+        queryParamsMap.putIfAbsent("user", List.of(user)); // NON-NLS
+      } else {
+        LOGGER.error("Cannot get system user.name from Launcher");
+      }
+    }
+
+    // Add or Force replace the 'host' parameter defined in config service query parameter.
+    String hostFromLocal = null;
+
+    List<String> queryParamHosts = queryParamsMap.get("host"); // NON-NLS
+    String queryParamHost = (queryParamHosts != null) ? queryParamHosts.getFirst() : null;
+
+    try {
+      hostFromLocal = getHostName();
+      queryParamsMap.put("host", List.of(hostFromLocal)); // NON-NLS
+    } catch (Exception e) {
+      String err = "Cannot get local hostname from Launcher";
+      if (Utils.hasText(queryParamHost))
+        err += ", the query param 'host' given is used instead : " + queryParamHost;
+      LOGGER.error(err, e);
+    }
+
+    if (Utils.hasText(hostFromLocal)
+        && Utils.hasText(queryParamHost)
+        && !queryParamHost.equalsIgnoreCase(hostFromLocal)) {
+      LOGGER.info(
+          "LocalHost name found '{}' differs from the one given in LaunchConfigService URL parameter '{}'",
+          hostFromLocal,
+          queryParamHost);
+    }
+
+    String queryParamString =
+        queryParamsMap.entrySet().stream()
+            .flatMap(entry -> entry.getValue().stream().map(val -> entry.getKey() + "=" + val))
+            .collect(Collectors.joining("&"));
+
+    return new URI(
+        configServiceUri.getScheme(),
+        null,
+        configServiceUri.getHost(),
+        configServiceUri.getPort(),
+        configServiceUri.getPath(),
+        queryParamString,
+        null);
+  }
+
+  private static String getHostName() throws UnknownHostException, SocketException {
+    InetAddress localhost = InetAddress.getLocalHost();
+    String hostName = localhost.getHostName();
+
+    // Verify if the host name is an IP address
+    if (hostName.equals(localhost.getHostAddress())) {
+      Enumeration<NetworkInterface> networkInterfaces = NetworkInterface.getNetworkInterfaces();
+      while (networkInterfaces.hasMoreElements()) {
+        NetworkInterface networkInterface = networkInterfaces.nextElement();
+        Enumeration<InetAddress> inetAddresses = networkInterface.getInetAddresses();
+        while (inetAddresses.hasMoreElements()) {
+          InetAddress inetAddress = inetAddresses.nextElement();
+          if (!inetAddress.isLoopbackAddress() && inetAddress.isSiteLocalAddress()) {
+            hostName = inetAddress.getCanonicalHostName();
+            break;
+          }
+        }
+        if (!hostName.equals(localhost.getHostAddress())) {
+          break;
+        }
+      }
+    }
+    return hostName;
+  }
+
   private Map<String, List<String>> getConfigParamsFromServicePath() {
 
     String configServicePath = properties.getProperty(P_WEASIS_CONFIG_URL);
@@ -568,11 +633,12 @@ public class ConfigData {
     try {
       URI configServiceUri = new URI(configServicePath);
 
-      if (configServiceUri.getScheme().startsWith("file")) {
+      if (configServiceUri.getScheme().startsWith("file")) { // NON-NLS
         stream = new FileInputStream(new File(configServiceUri));
       } else {
+        URI adaptedConfigServiceUri = adaptConfigServiceURI(configServiceUri);
         URLConnection urlConnection =
-            FileUtil.getAdaptedConnection(new URI(configServicePath).toURL(), false);
+            FileUtil.getAdaptedConnection(adaptedConfigServiceUri.toURL(), false);
 
         urlConnection.setRequestProperty("Accept", "application/xml"); // NON-NLS
         urlConnection.setConnectTimeout(

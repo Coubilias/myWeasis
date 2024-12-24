@@ -37,7 +37,6 @@ import org.dcm4che3.data.Tag;
 import org.dcm4che3.img.data.PrDicomObject;
 import org.dcm4che3.img.lut.PresetWindowLevel;
 import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
 import org.osgi.service.prefs.Preferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +47,7 @@ import org.weasis.core.api.gui.Insertable.Type;
 import org.weasis.core.api.gui.InsertableUtil;
 import org.weasis.core.api.gui.util.ActionState;
 import org.weasis.core.api.gui.util.ActionW;
+import org.weasis.core.api.gui.util.AppProperties;
 import org.weasis.core.api.gui.util.BasicActionState;
 import org.weasis.core.api.gui.util.ComboItemListener;
 import org.weasis.core.api.gui.util.Feature;
@@ -94,6 +94,7 @@ import org.weasis.core.ui.editor.image.ViewCanvas;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
 import org.weasis.core.ui.editor.image.ViewerToolBar;
 import org.weasis.core.ui.editor.image.ZoomToolBar;
+import org.weasis.core.ui.launcher.Launcher;
 import org.weasis.core.ui.model.graphic.Graphic;
 import org.weasis.core.ui.model.layer.LayerType;
 import org.weasis.core.ui.model.utils.bean.PanPoint;
@@ -107,9 +108,14 @@ import org.weasis.dicom.codec.geometry.ImageOrientation;
 import org.weasis.dicom.codec.utils.DicomResource;
 import org.weasis.dicom.explorer.DicomExplorer;
 import org.weasis.dicom.explorer.DicomExplorer.ListPosition;
+import org.weasis.dicom.explorer.DicomExportAction;
+import org.weasis.dicom.explorer.DicomModel;
 import org.weasis.dicom.viewer2d.mip.MipView;
+import org.weasis.dicom.viewer2d.mpr.MprAxis;
 import org.weasis.dicom.viewer2d.mpr.MprContainer;
+import org.weasis.dicom.viewer2d.mpr.MprController;
 import org.weasis.dicom.viewer2d.mpr.MprView;
+import org.weasis.dicom.viewer2d.mpr.Volume;
 import org.weasis.opencv.op.ImageConversion;
 import org.weasis.opencv.op.lut.ByteLut;
 import org.weasis.opencv.op.lut.ColorLut;
@@ -198,7 +204,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
     setAction(newKOFilterAction());
     setAction(newKOSelectionAction());
 
-    final BundleContext context = FrameworkUtil.getBundle(this.getClass()).getBundleContext();
+    final BundleContext context = AppProperties.getBundleContext(this.getClass());
     Preferences prefs = BundlePreferences.getDefaultPreferences(context);
     zoomSetting.applyPreferences(prefs);
     mouseActions.applyPreferences(prefs);
@@ -220,6 +226,9 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
           options, WindowOp.P_APPLY_WL_COLOR, prefNode, Boolean.TRUE.toString());
       WProperties.setProperty(options, WindowOp.P_INVERSE_LEVEL, prefNode, Boolean.TRUE.toString());
       WProperties.setProperty(options, PRManager.PR_APPLY, prefNode, Boolean.FALSE.toString());
+
+      WProperties.setProperty(options, View2d.P_CROSSHAIR_MODE, prefNode, "1");
+      WProperties.setProperty(options, View2d.P_CROSSHAIR_CENTER_GAP, prefNode, "40");
     }
 
     initializeParameters();
@@ -264,7 +273,19 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
           view2d = selectedView2dContainer.getSelectedImagePane();
         }
 
-        if (view2d != null && view2d.getSeries() instanceof Series) {
+        if (view2d instanceof MprView mprView) {
+          MprContainer mprContainer = (MprContainer) selectedView2dContainer;
+          MprController controller = mprContainer.getMprController();
+          MprAxis axis = controller.getMprAxis(mprView.getSliceOrientation());
+          int index = model.getValue() - 1;
+          axis.setSliceIndex(index);
+          boolean oldAdjusting = controller.isAdjusting();
+          controller.setAdjusting(model.getValueIsAdjusting());
+          axis.updateImage();
+          image = axis.getImageElement();
+          controller.setAdjusting(oldAdjusting);
+          mediaEvent = new SynchCineEvent(view2d, image, index);
+        } else if (view2d != null && view2d.getSeries() instanceof Series) {
           series = (Series<DicomImageElement>) view2d.getSeries();
           if (series != null) {
             // Model contains display value, value-1 is the index value of a sequence
@@ -716,6 +737,7 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
     if (!commonDisplayShortcuts(e)) {
       int keyEvent = e.getKeyCode();
       int modifiers = e.getModifiers();
+      boolean isMpr = selectedView2dContainer instanceof MprContainer;
 
       if (keyEvent == KeyEvent.VK_LEFT && !e.isAltDown()) {
         if (e.isControlDown()) {
@@ -749,6 +771,34 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
         movePatient(ListPosition.FIRST);
       } else if (keyEvent == KeyEvent.VK_END && e.isControlDown()) {
         movePatient(ListPosition.LAST);
+      } else if (isMpr && keyEvent == KeyEvent.VK_A && e.isAltDown()) {
+        if (selectedView2dContainer.getSelectedImagePane() instanceof MprView mprView) {
+          mprView.recenterAxis(false);
+        }
+      } else if (isMpr && keyEvent == KeyEvent.VK_S && e.isAltDown()) {
+        if (selectedView2dContainer.getSelectedImagePane() instanceof MprView mprView) {
+          boolean showCenter = MprView.getViewProperty(mprView, MprView.SHOW_CROSS_CENTER);
+          mprView.showCrossCenter(!showCenter, false);
+        }
+      } else if (isMpr && keyEvent == KeyEvent.VK_D && e.isAltDown()) {
+        if (selectedView2dContainer.getSelectedImagePane() instanceof MprView mprView) {
+          boolean showCrossLines = MprView.getViewProperty(mprView, MprView.HIDE_CROSSLINES);
+          mprView.showCrossLines(showCrossLines, false);
+        }
+      } else if (isMpr && keyEvent == KeyEvent.VK_C && e.isAltDown()) {
+        if (selectedView2dContainer.getSelectedImagePane() instanceof MprView mprView) {
+          mprView.recenterAxis(true);
+        }
+      } else if (isMpr && keyEvent == KeyEvent.VK_V && e.isAltDown()) {
+        if (selectedView2dContainer.getSelectedImagePane() instanceof MprView mprView) {
+          boolean showCenter = mprView.getAllViewsProperty(MprView.SHOW_CROSS_CENTER);
+          mprView.showCrossCenter(!showCenter, true);
+        }
+      } else if (isMpr && keyEvent == KeyEvent.VK_B && e.isAltDown()) {
+        if (selectedView2dContainer.getSelectedImagePane() instanceof MprView mprView) {
+          boolean showCrossLines = mprView.getAllViewsProperty(MprView.HIDE_CROSSLINES);
+          mprView.showCrossLines(showCrossLines, true);
+        }
       } else {
         keyPreset(keyEvent, modifiers);
         triggerDrawingToolKeyEvent(keyEvent, modifiers);
@@ -883,6 +933,27 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
   }
 
   @Override
+  public String resolvePlaceholders(String template) {
+    return DicomExportAction.resolvePlaceholders(template, this);
+  }
+
+  @Override
+  public void dicomExportAction(Launcher launcher) {
+    if (launcher != null && launcher.getConfiguration().isDicomSelectionAction()) {
+      DicomExplorer dicom = getDicomExplorer();
+      if (dicom != null) {
+        DicomModel dicomModel = (DicomModel) dicom.getDataExplorerModel();
+        DicomExportAction action = new DicomExportAction(launcher, dicomModel);
+        try {
+          action.execute();
+        } catch (IOException e) {
+          LOGGER.error("Copy DICOM failed", e);
+        }
+      }
+    }
+  }
+
+  @Override
   public void resetDisplay() {
     reset(ResetTools.ALL);
   }
@@ -994,16 +1065,26 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
       getAction(ActionW.LENS_ZOOM).ifPresent(a -> a.setRealValue(Math.abs(lensZoom), false));
     }
 
+    boolean isMprOrOblique =
+        selectedView2dContainer instanceof MprContainer c
+            && c.getMprController().getVolume() != null;
     MediaSeries<DicomImageElement> series = view2d.getSeries();
-    cineAction.ifPresent(
-        a ->
-            a.setSliderMinMaxValue(
-                1,
-                series.size(
-                    (Filter<DicomImageElement>)
-                        view2d.getActionValue(ActionW.FILTERED_SERIES.cmd())),
-                view2d.getFrameIndex() + 1,
-                false));
+    int maxSlice;
+    int currentSlice;
+    if (isMprOrOblique && view2d instanceof MprView mprView) {
+      MprContainer mprContainer = (MprContainer) selectedView2dContainer;
+      MprController controller = mprContainer.getMprController();
+      Volume<?> volume = controller.getVolume();
+      maxSlice = volume.getSliceSize();
+      MprAxis axis = controller.getMprAxis(mprView.getSliceOrientation());
+      currentSlice = axis.getSliceIndex();
+    } else {
+      maxSlice =
+          series.size(
+              (Filter<DicomImageElement>) view2d.getActionValue(ActionW.FILTERED_SERIES.cmd()));
+      currentSlice = view2d.getFrameIndex() + 1;
+    }
+    cineAction.ifPresent(a -> a.setSliderMinMaxValue(1, maxSlice, currentSlice, false));
 
     Double cineRate = TagD.getTagValue(view2d.getImage(), Tag.CineRate, Double.class);
     cineAction.ifPresent(
@@ -1024,6 +1105,8 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
                 a.setSelectedWithoutTriggerAction(
                     (Boolean) view2d.getActionValue(ActionW.INVERSE_STACK.cmd())));
     getAction(ActionW.VOLUME).ifPresent(a -> a.enableAction(series.isSuitableFor3d()));
+
+    getAction(ActionW.CROSSHAIR).ifPresent(a -> a.enableAction(!isMprOrOblique));
     updateKeyObjectComponentsListener(view2d);
 
     // register all actions for the selected view and for the other views register according to
@@ -1329,7 +1412,10 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
               }
             }
             // Force drawing crosslines without changing the slice position
-            cineAction.ifPresent(a -> a.stateChanged(a.getSliderModel()));
+            boolean isMprOrOblique = selectedView2dContainer instanceof MprContainer;
+            if (!isMprOrOblique) {
+              cineAction.ifPresent(a -> a.stateChanged(a.getSliderModel()));
+            }
 
           } else if (Mode.TILE.equals(synch.getMode())) {
             final List<ViewCanvas<DicomImageElement>> panes =
@@ -1415,6 +1501,13 @@ public class EventManager extends ImageViewerEventManager<DicomImageElement>
           options.getBooleanProperty(WindowOp.P_INVERSE_LEVEL, true));
       BundlePreferences.putBooleanPreferences(
           prefNode, PRManager.PR_APPLY, options.getBooleanProperty(PRManager.PR_APPLY, false));
+
+      BundlePreferences.putIntPreferences(
+          prefNode, View2d.P_CROSSHAIR_MODE, options.getIntProperty(View2d.P_CROSSHAIR_MODE, 1));
+      BundlePreferences.putIntPreferences(
+          prefNode,
+          View2d.P_CROSSHAIR_CENTER_GAP,
+          options.getIntProperty(View2d.P_CROSSHAIR_CENTER_GAP, 40));
 
       Preferences containerNode =
           prefs.node(View2dContainer.UI.clazz.getSimpleName().toLowerCase());

@@ -12,8 +12,10 @@ package org.weasis.core.ui.editor.image;
 import java.awt.Graphics;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
+import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.beans.PropertyChangeListener;
@@ -227,6 +229,18 @@ public abstract class GraphicsPane extends JComponent implements Canvas {
   public Point2D getViewCoordinatesOffset() {
     Rectangle2D b = getImageViewBounds(getWidth(), getHeight());
     return new Point2D.Double(b.getX(), b.getY());
+  }
+
+  public Path2D getVisibleImageViewBounds() {
+    Point2D p = getClipViewCoordinatesOffset();
+    Rectangle2D bounds = new Rectangle2D.Double(-p.getX(), -p.getY(), getWidth(), getHeight());
+    Shape path = inverseTransform.createTransformedShape(bounds);
+    if (path instanceof Path2D path2D) {
+      return path2D;
+    }
+    Path2D path2D = new Path2D.Double();
+    path2D.append(bounds, false);
+    return path2D;
   }
 
   @Override

@@ -1,5 +1,39 @@
 # Changelog
 
+## [v4.5.1](https://github.com/nroduit/Weasis/tree/v4.5.1) (2024-09-18)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.5.0...v4.5.1)
+
+**Implemented enhancements:**
+
+- URl handler issue on Mac for all users [\#583](https://github.com/nroduit/Weasis/issues/583)
+- Add Dicom Calling Node to Dicom Export -\> Dicom Send. [\#575](https://github.com/nroduit/Weasis/issues/575)
+
+**Fixed bugs:**
+
+- MPR preferences are not persistent [\#589](https://github.com/nroduit/Weasis/issues/589)
+- Separate dock icon on Ubuntu [\#588](https://github.com/nroduit/Weasis/issues/588)
+- DICOMDIR cannot be written if it contains special DICOM elements [\#586](https://github.com/nroduit/Weasis/issues/586)
+- Missing the boot.log file [\#579](https://github.com/nroduit/Weasis/issues/579)
+- Failed to send to DICOM archive [\#577](https://github.com/nroduit/Weasis/issues/577)
+
+## [v4.5.0](https://github.com/nroduit/Weasis/tree/v4.5.0) (2024-08-15)
+
+[Full Changelog](https://github.com/nroduit/Weasis/compare/v4.4.0...v4.5.0)
+
+**Implemented enhancements:**
+
+- Launch third party applications in Weasis UI [\#570](https://github.com/nroduit/Weasis/issues/570)
+- Command: add close a specific patient from its patient ID [\#562](https://github.com/nroduit/Weasis/issues/562)
+- Improve reading DICOM SEG [\#560](https://github.com/nroduit/Weasis/issues/560)
+- Measurements for US studies [\#32](https://github.com/nroduit/Weasis/issues/32)
+
+**Fixed bugs:**
+
+- In Query/Retrieve view, the selected DICOM node is not preserved when using More Options [\#571](https://github.com/nroduit/Weasis/issues/571)
+- Dicomizer: Limit the number of characters in metadata table according to the DICOM attributes [\#564](https://github.com/nroduit/Weasis/issues/564)
+- Preserve measurement tool unit selection within a series [\#551](https://github.com/nroduit/Weasis/issues/551)
+
 ## [v4.4.0](https://github.com/nroduit/Weasis/tree/v4.4.0) (2024-05-06)
 
 [Full Changelog](https://github.com/nroduit/Weasis/compare/v4.3.0...v4.4.0)

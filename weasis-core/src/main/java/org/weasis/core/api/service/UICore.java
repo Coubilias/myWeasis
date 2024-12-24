@@ -18,6 +18,7 @@ import bibliothek.gui.dock.common.CWorkingArea;
 import bibliothek.gui.dock.common.event.CVetoFocusListener;
 import bibliothek.gui.dock.common.intern.CDockable;
 import bibliothek.gui.dock.event.KeyboardListener;
+import java.awt.GraphicsEnvironment;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
 import java.io.DataOutputStream;
@@ -59,6 +60,7 @@ import org.weasis.core.api.util.URLParameters;
 import org.weasis.core.ui.editor.SeriesViewer;
 import org.weasis.core.ui.editor.SeriesViewerFactory;
 import org.weasis.core.ui.editor.image.ViewerPlugin;
+import org.weasis.core.ui.launcher.Launcher;
 import org.weasis.core.ui.util.ToolBarContainer;
 import org.weasis.core.ui.util.Toolbar;
 import org.weasis.core.util.FileUtil;
@@ -72,6 +74,8 @@ public final class UICore {
   public static final String LINUX_WINDOWS_DECORATION = "weasis.linux.windows.decoration";
   private static final Logger LOGGER = LoggerFactory.getLogger(UICore.class);
   private final ToolBarContainer toolbarContainer;
+  private final List<Launcher> dicomLaunchers;
+  private final List<Launcher> otherLaunchers;
   public final List<ViewerPlugin<?>> viewerPlugins;
   private final List<DataExplorerView> explorerPlugins;
   private final List<Toolbar> explorerPluginToolbars;
@@ -96,9 +100,14 @@ public final class UICore {
   /** Do not instantiate UICore, get OSGI singleton service from GuiUtils.getUICore() */
   private UICore() {
     this.dockingControl = new CControl();
-    this.baseArea = dockingControl.getContentArea();
+    if (GraphicsEnvironment.isHeadless()) {
+      this.baseArea = null; // For test where no GUI is available
+    } else {
+      this.baseArea = dockingControl.getContentArea();
+    }
     this.mainArea = dockingControl.createWorkingArea("mainArea");
     this.toolbarContainer = new ToolBarContainer();
+
     this.configData = retrieveconfigData();
     this.initialSystemPreferences = new WProperties();
     this.systemPreferences = new WProperties();
@@ -145,6 +154,9 @@ public final class UICore {
 
     File dataFolder = AppProperties.getBundleDataFolder(context);
     FileUtil.readProperties(new File(dataFolder, "persistence.properties"), localPersistence);
+
+    this.dicomLaunchers = Launcher.loadLaunchers(Launcher.Type.DICOM);
+    this.otherLaunchers = Launcher.loadLaunchers(Launcher.Type.OTHER);
   }
 
   private static ConfigData retrieveconfigData() {
@@ -333,6 +345,14 @@ public final class UICore {
 
   public CControl getDockingControl() {
     return dockingControl;
+  }
+
+  public List<Launcher> getDicomLaunchers() {
+    return dicomLaunchers;
+  }
+
+  public List<Launcher> getOtherLaunchers() {
+    return otherLaunchers;
   }
 
   public CWorkingArea getMainArea() {
