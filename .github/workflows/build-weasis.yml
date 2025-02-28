@@ -1,0 +1,39 @@
+name: Build Weasis
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Up Java 23
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '23'
+
+      - name: Install Maven
+        run: |
+          sudo apt update
+          sudo apt install -y maven
+
+      - name: Build Weasis
+        run: |
+          mvn clean install
+          mvn -P compressXZ -f weasis-distributions clean package
+          mvn -P compressXZ,-purgeI18nPackage -f weasis-distributions clean package
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: weasis-build
+          path: weasis-distributions/target/native-dist/weasis-native.zip
